@@ -3,7 +3,7 @@ from flask import Flask, request
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from allocation.domain import model
+from allocation.domain import model as domain_model
 from allocation.adapters import orm
 from allocation.service_layer import services, unit_of_work
 
@@ -11,31 +11,31 @@ app = Flask(__name__)
 orm.start_mappers()
 
 
-@app.route("/add_batch", methods=["POST"])
-def add_batch():
-    eta = request.json["eta"]
-    if eta is not None:
-        eta = datetime.fromisoformat(eta).date()
-    services.add_batch(
-        request.json["ref"],
-        request.json["sku"],
-        request.json["qty"],
-        eta,
+@app.route("/add_appointment_slot", methods=["POST"])
+def add_appointment_slot_endpoint():
+    start_time = request.json["start_time"]
+    if start_time is not None:
+        start_time = datetime.fromisoformat(start_time).date()
+    services.add_appointment_slot(
+        request.json["slot_reference"],
+        request.json["service_type"],
+        request.json["availability"],
+        start_time,
         unit_of_work.SqlAlchemyUnitOfWork(),
     )
     return "OK", 201
 
 
-@app.route("/allocate", methods=["POST"])
-def allocate_endpoint():
+@app.route("/allocate_slot", methods=["POST"])
+def allocate_slot_endpoint():
     try:
-        batchref = services.allocate(
+        slot_ref = services.allocate_slot(
             request.json["orderid"],
-            request.json["sku"],
-            request.json["qty"],
+            request.json["service_type"],
+            request.json["availability"],
             unit_of_work.SqlAlchemyUnitOfWork(),
         )
-    except (model.OutOfStock, services.InvalidSku) as e:
+    except (domain_model.NotEnoughAvailability, services.InvalidServiceType) as e:
         return {"message": str(e)}, 400
 
-    return {"batchref": batchref}, 201
+    return {"appointment_reference": slot_ref}, 201

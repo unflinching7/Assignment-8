@@ -2,37 +2,41 @@ from __future__ import annotations
 from typing import Optional
 from datetime import date
 
-from allocation.domain import model
-from allocation.domain.model import OrderLine
+from allocation.domain import model as domain_model
+from allocation.domain.model import CheckInRequest
 from allocation.service_layer import unit_of_work
 
 
-class InvalidSku(Exception):
+class NotEnoughAvailability(Exception):
     pass
 
 
-def add_batch(
-    ref: str, sku: str, qty: int, eta: Optional[date],
+def add_appointment_slot(
+    slot_reference: str, service_type: str, availability: int, start_time: Optional[date],
     uow: unit_of_work.AbstractUnitOfWork,
 ):
     with uow:
-        product = uow.products.get(sku=sku)
-        if product is None:
-            product = model.Product(sku, batches=[])
-            uow.products.add(product)
-        product.batches.append(model.Batch(ref, sku, qty, eta))
+        service_offering = uow.service_offerings.get(service_type=service_type)
+        if service_offering is None:
+            service_offering = domain_model.ServiceOffering(
+                service_type, slots=[])
+            uow.service_offerings.add(service_offering)
+        service_offering.slots.append(domain_model.Slot(
+            slot_reference, service_type, availability, start_time))
         uow.commit()
 
 
-def allocate(
-    orderid: str, sku: str, qty: int,
+def allocate_slot(
+    orderid: str, service_type: str, availability: int,
     uow: unit_of_work.AbstractUnitOfWork,
 ) -> str:
-    line = OrderLine(orderid, sku, qty)
+    check_in_request = CheckInRequest(orderid, service_type, availability)
     with uow:
-        product = uow.products.get(sku=line.sku)
-        if product is None:
-            raise InvalidSku(f"Invalid sku {line.sku}")
-        batchref = product.allocate(line)
+        service_offering = uow.service_offerings.get(
+            service_type=check_in_request.service_type)
+        if service_offering is None:
+            raise InvalidSku(
+                f"Invalid service type {check_in_request.service_type}")
+        slot_ref = service_offering.allocate(check_in_request)
         uow.commit()
-    return batchref
+    return slot_ref

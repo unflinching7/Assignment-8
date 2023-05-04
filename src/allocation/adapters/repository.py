@@ -4,11 +4,11 @@ from allocation.domain import model
 
 class AbstractRepository(abc.ABC):
     @abc.abstractmethod
-    def add(self, product: model.Product):
+    def add(self, service_offering: model.ServiceOffering):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def get(self, sku) -> model.Product:
+    def get(self, service_type) -> model.ServiceOffering:
         raise NotImplementedError
 
 
@@ -16,8 +16,8 @@ class SqlAlchemyRepository(AbstractRepository):
     def __init__(self, session):
         self.session = session
 
-    def add(self, product):
-        self.session.add(product)
+    def add(self, service_offering):
+        self.session.add(service_offering)
 
-    def get(self, sku):
-        return self.session.query(model.Product).filter_by(sku=sku).first()
+    def get(self, service_type):
+        return self.session.query(model.ServiceOffering).filter_by(service_type=service_type).first()

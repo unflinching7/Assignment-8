@@ -3,48 +3,46 @@ from sqlalchemy.orm import registry, relationship
 
 from allocation.domain import model
 
-# https://docs.sqlalchemy.org/en/20/orm/mapping_styles.html#imperative-mapping
-# using SQLAlchemy 2.0-style imperative mapping
 mapper_registry = registry()
 
 order_lines = Table(
     "order_lines",
     mapper_registry.metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
-    Column("sku", String(255)),
-    Column("qty", Integer, nullable=False),
+    Column("service_type", String(255)),
+    Column("availability", Integer, nullable=False),
     Column("orderid", String(255)),
 )
 
-batches = Table(
-    "batches",
+appointment_slots = Table(
+    "appointment_slots",
     mapper_registry.metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
-    Column("reference", String(255)),
-    Column("sku", String(255)),
+    Column("slot_reference", String(255)),
+    Column("service_type", String(255)),
     Column("_purchased_quantity", Integer, nullable=False),
-    Column("eta", Date, nullable=True),
+    Column("start_time", Date, nullable=True),
 )
 
-allocations = Table(
-    "allocations",
+checked_into_location = Table(
+    "checked_into_location",
     mapper_registry.metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("orderline_id", ForeignKey("order_lines.id")),
-    Column("batch_id", ForeignKey("batches.id")),
+    Column("slot_id", ForeignKey("appointment_slots.id")),
 )
 
 
 def start_mappers():
     lines_mapper = mapper_registry.map_imperatively(
-        model.OrderLine, order_lines)
+        model.CheckInRequest, order_lines)
     mapper_registry.map_imperatively(
-        model.Batch,
-        batches,
+        model.ServiceOffering,
+        appointment_slots,
         properties={
-            "_allocations": relationship(
+            "_checked_into_location": relationship(
                 lines_mapper,
-                secondary=allocations,
+                secondary=checked_into_location,
                 collection_class=set,
             )
         },

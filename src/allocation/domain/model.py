@@ -4,75 +4,76 @@ from datetime import date
 from typing import Optional, List, Set
 
 
-class OutOfStock(Exception):
+class NoAvailableSlots(Exception):
     pass
 
 
-class Product:
-    def __init__(self, sku: str, batches: List[Batch], version_number: int = 0):
-        self.sku = sku
-        self.batches = batches
+class ServiceOffering:
+    def __init__(self, service_type: str, appointment_slots: List[AppointmentSlot], version_number: int = 0):
+        self.service_type = service_type
+        self.appointment_slots = appointment_slots
         self.version_number = version_number
 
-    def allocate(self, line: OrderLine) -> str:
+    def allocate(self, request: CheckInRequest) -> str:
         try:
-            batch = next(b for b in sorted(self.batches)
-                         if b.can_allocate(line))
-            batch.allocate(line)
+            slot = next(s for s in sorted(self.appointment_slots)
+                        if s.can_allocate(request))
+            slot.allocate(request)
             self.version_number += 1
-            return batch.reference
+            return slot.appointment_reference
         except StopIteration:
-            raise OutOfStock(f"Out of stock for sku {line.sku}")
+            raise NoAvailableSlots(
+                f"No available slots for service type {request.service_type}")
 
 
 @dataclass(unsafe_hash=True)
-class OrderLine:
+class CheckInRequest:
     orderid: str
-    sku: str
-    qty: int
+    service_type: str
+    availability: int
 
 
-class Batch:
-    def __init__(self, ref: str, sku: str, qty: int, eta: Optional[date]):
-        self.reference = ref
-        self.sku = sku
-        self.eta = eta
-        self._purchased_quantity = qty
-        self._allocations = set()  # type: Set[OrderLine]
+class AppointmentSlot:
+    def __init__(self, appointment_reference: str, service_type: str, availability: int, start_time: Optional[date]):
+        self.appointment_reference = appointment_reference
+        self.service_type = service_type
+        self.start_time = start_time
+        self._purchased_quantity = availability
+        self._allocations = set()  # type: Set[CheckInRequest]
 
     def __repr__(self):
-        return f"<Batch {self.reference}>"
+        return f"<AppointmentSlot {self.appointment_reference}>"
 
     def __eq__(self, other):
-        if not isinstance(other, Batch):
+        if not isinstance(other, AppointmentSlot):
             return False
-        return other.reference == self.reference
+        return other.appointment_reference == self.appointment_reference
 
     def __hash__(self):
-        return hash(self.reference)
+        return hash(self.appointment_reference)
 
     def __gt__(self, other):
-        if self.eta is None:
+        if self.start_time is None:
             return False
-        if other.eta is None:
+        if other.start_time is None:
             return True
-        return self.eta > other.eta
+        return self.start_time > other.start_time
 
-    def allocate(self, line: OrderLine):
-        if self.can_allocate(line):
-            self._allocations.add(line)
+    def allocate(self, request: CheckInRequest):
+        if self.can_allocate(request):
+            self._allocations.add(request)
 
-    def deallocate(self, line: OrderLine):
-        if line in self._allocations:
-            self._allocations.remove(line)
+    def deallocate(self, request: CheckInRequest):
+        if request in self._allocations:
+            self._allocations.remove(request)
 
     @property
     def allocated_quantity(self) -> int:
-        return sum(line.qty for line in self._allocations)
+        return sum(request.availability for request in self._allocations)
 
     @property
     def available_quantity(self) -> int:
         return self._purchased_quantity - self.allocated_quantity
 
-    def can_allocate(self, line: OrderLine) -> bool:
-        return self.sku == line.sku and self.available_quantity >= line.qty
+    def can_allocate(self, request: CheckInRequest) -> bool:
+        return self.service_type == request.service_type and self.available_quantity >= request.availability
