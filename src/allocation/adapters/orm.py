@@ -5,8 +5,8 @@ from allocation.domain import model
 
 mapper_registry = registry()
 
-order_lines = Table(
-    "order_lines",
+check_in_requests = Table(
+    "check_in_requests",
     mapper_registry.metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("service_type", String(255)),
