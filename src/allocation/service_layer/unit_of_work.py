@@ -9,25 +9,42 @@ from allocation.adapters import repository
 
 
 class AbstractUnitOfWork(abc.ABC):
-    check_in_requests: repository.AbstractRepository
+    service_offerings: repository.AbstractRepository
 
     def __enter__(self) -> AbstractUnitOfWork:
-        return self
+    return self
 
-    def __exit__(self, *args):
-        self.cancel_reservation()
 
-    @abc.abstractmethod
-    def reserve_slot(self):
-        raise NotImplementedError
+def __exit__(self, *args):
+    self.rollback()
 
-    @abc.abstractmethod
-    def cancel_reservation(self):
-        raise NotImplementedError
+
+def commit(self):
+    self._commit()
+
+
+def collect_new_events(self):
+    for service_offering in self.service_offerings.seen:
+        while service_offering.events:
+            yield service_offering.events.pop(0)
+
+
+@abc.abstractmethod
+def _commit(self):
+    raise NotImplementedError
+
+
+@abc.abstractmethod
+def rollback(self):
+    raise NotImplementedError
 
 
 DEFAULT_SESSION_FACTORY = sessionmaker(
     bind=create_engine(
+        # substituting POSTGRES with the in-memory sqlite
+        # config.get_postgres_uri(),
+        "sqlite+pysqlite:///:memory:",
+        echo=True,
         config.get_postgres_uri(),
         isolation_level="REPEATABLE READ",
     )
@@ -40,17 +57,15 @@ class SqlAlchemyUnitOfWork(AbstractUnitOfWork):
 
     def __enter__(self):
         self.session = self.session_factory()  # type: Session
-        self.check_in_requests = repository.SqlAlchemyRepository(self.session)
+        self.service_offerings = repository.SqlAlchemyRepository(self.session)
         return super().__enter__()
 
     def __exit__(self, *args):
         super().__exit__(*args)
         self.session.close()
 
-    def reserve_slot(self):
+    def _commit(self):
         self.session.commit()
 
-    def cancel_reservation(self):
-        self.session.rollback()
-
+    def rollback(self):
         self.session.rollback()

@@ -1,11 +1,10 @@
 from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import date
-from typing import Optional, List, Set
+from typing import List, Optional, Set
 
-
-class NoAvailableSlots(Exception):
-    pass
+from . import commands, events
 
 
 class ServiceOffering:
@@ -13,43 +12,62 @@ class ServiceOffering:
         self.service_type = service_type
         self.appointment_slots = appointment_slots
         self.location_number = location_number
+        self.events = []  # type: List[events.Event]
 
-    def reserve_slot(self, request: CheckInRequest) -> str:
+    def reserve_slot(self, checkin_request: CheckInRequest) -> str:
         try:
             slot = next(s for s in sorted(self.appointment_slots)
-                        if s.can_reserve(request))
-            slot.reserve(request)
-            return slot.appointment_reference
+                        if s.can_reserve(checkin_request))
+            slot.reserve(checkin_request)
+            self.location_number += 1
+            self.events.append(
+                events.Reserved(
+                    requestid=checkin_request.requestid,
+                    service_type=checkin_request.service_type,
+                    reserved_quantity=checkin_request.qty,
+                    slot_ref=slot.slot_ref,
+                )
+            )
+            return slot.slot_ref
         except StopIteration:
-            raise NoAvailableSlots(
-                f"No available slots for service type {request.service_type}")
+            self.events.append(events.NoAvailableSlots(
+                checkin_request.service_type))
+            return None
+
+    def change_slot_quantity(self, slot_ref: str, qty: int):
+        slot = next(s for s in self.appointment_slots if s.slot_ref == slot_ref)
+        slot.slot_qty = qty
+        while slot.available_quantity < 0:
+            checkin_request = slot.cancel_reservation_one()
+            self.events.append(events.CancelledReservation(
+                checkin_request.requestid, checkin_request.service_type, checkin_request.qty))
 
 
 @dataclass(unsafe_hash=True)
 class CheckInRequest:
-    orderid: str
+    requestid: str
     service_type: str
-    reservation_qty: int
+    qty: int
 
 
 class AppointmentSlot:
-    def __init__(self, appointment_reference: str, service_type: str, slot_qty: int, start_time: Optional[date]):
-        self.appointment_reference = appointment_reference
+    def __init__(self, slot_ref: str, service_type: str, availability: int, start_time: Optional[date]):
+        self.slot_ref = slot_ref
         self.service_type = service_type
         self.start_time = start_time
-        self.slot_qty = slot_qty
+        self._slot_qty = availability
         self._reservations = set()  # type: Set[CheckInRequest]
 
     def __repr__(self):
-        return f"<AppointmentSlot {self.appointment_reference}>"
+        return f"<AppointmentSlot {self.slot_ref}>"
 
     def __eq__(self, other):
         if not isinstance(other, AppointmentSlot):
             return False
-        return other.appointment_reference == self.appointment_reference
+        return other.slot_ref == self.slot_ref
 
     def __hash__(self):
-        return hash(self.appointment_reference)
+        return hash(self.slot_ref)
 
     def __gt__(self, other):
         if self.start_time is None:
@@ -58,21 +76,20 @@ class AppointmentSlot:
             return True
         return self.start_time > other.start_time
 
-    def reserve(self, request: CheckInRequest):
-        if self.can_reserve(request):
-            self._reservations.add(request)
+    def reserve(self, checkin_request: CheckInRequest):
+        if self.can_reserve(checkin_request):
+            self._reservations.add(checkin_request)
 
-    def cancel_reservation(self, request: CheckInRequest):
-        if request in self._reservations:
-            self._reservations.remove(request)
+    def cancel_reservation_one(self) -> CheckInRequest:
+        return self._reservations.pop()
 
     @property
     def reserved_quantity(self) -> int:
-        return sum(request.reservation_qty for request in self._reservations)
+        return sum(req.qty for req in self._reservations)
 
     @property
     def available_quantity(self) -> int:
-        return self.slot_qty - self.reserved_quantity
+        return self._slot_qty - self.reserved_quantity
 
-    def can_reserve(self, request: CheckInRequest) -> bool:
-        return self.service_type == request.service_type and self.available_quantity >= request.reservation_qty
+    def can_reserve(self, checkin_request: CheckInRequest) -> bool:
+        return self.service_type == checkin_request.service_type and self.available_quantity >= checkin_request.qty
