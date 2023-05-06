@@ -26,16 +26,16 @@ def add_appointment_slot_endpoint():
     return "OK", 201
 
 
-@app.route("/allocate_slot", methods=["POST"])
-def allocate_slot_endpoint():
+@app.route("/reserve_slot", methods=["POST"])
+def reserve_slot_endpoint():
     try:
-        slot_ref = services.allocate_slot(
+        slot_ref = services.reserve_slot(
             request.json["orderid"],
             request.json["service_type"],
             request.json["availability"],
             unit_of_work.SqlAlchemyUnitOfWork(),
         )
-    except (domain_model.NotEnoughAvailability, services.InvalidServiceType) as e:
+    except (domain_model.NoAvailableSlots, services.InvalidServiceType) as e:
         return {"message": str(e)}, 400
 
     return {"appointment_reference": slot_ref}, 201

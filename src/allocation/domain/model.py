@@ -9,17 +9,16 @@ class NoAvailableSlots(Exception):
 
 
 class ServiceOffering:
-    def __init__(self, service_type: str, appointment_slots: List[AppointmentSlot], version_number: int = 0):
+    def __init__(self, service_type: str, appointment_slots: List[AppointmentSlot], location_number: int = 0):
         self.service_type = service_type
         self.appointment_slots = appointment_slots
-        self.version_number = version_number
+        self.location_number = location_number
 
-    def allocate(self, request: CheckInRequest) -> str:
+    def reserve_slot(self, request: CheckInRequest) -> str:
         try:
             slot = next(s for s in sorted(self.appointment_slots)
-                        if s.can_allocate(request))
-            slot.allocate(request)
-            self.version_number += 1
+                        if s.can_reserve(request))
+            slot.reserve(request)
             return slot.appointment_reference
         except StopIteration:
             raise NoAvailableSlots(
@@ -30,16 +29,16 @@ class ServiceOffering:
 class CheckInRequest:
     orderid: str
     service_type: str
-    availability: int
+    reservation_qty: int
 
 
 class AppointmentSlot:
-    def __init__(self, appointment_reference: str, service_type: str, availability: int, start_time: Optional[date]):
+    def __init__(self, appointment_reference: str, service_type: str, slot_qty: int, start_time: Optional[date]):
         self.appointment_reference = appointment_reference
         self.service_type = service_type
         self.start_time = start_time
-        self._purchased_quantity = availability
-        self._allocations = set()  # type: Set[CheckInRequest]
+        self.slot_qty = slot_qty
+        self._reservations = set()  # type: Set[CheckInRequest]
 
     def __repr__(self):
         return f"<AppointmentSlot {self.appointment_reference}>"
@@ -59,21 +58,21 @@ class AppointmentSlot:
             return True
         return self.start_time > other.start_time
 
-    def allocate(self, request: CheckInRequest):
-        if self.can_allocate(request):
-            self._allocations.add(request)
+    def reserve(self, request: CheckInRequest):
+        if self.can_reserve(request):
+            self._reservations.add(request)
 
-    def deallocate(self, request: CheckInRequest):
-        if request in self._allocations:
-            self._allocations.remove(request)
+    def cancel_reservation(self, request: CheckInRequest):
+        if request in self._reservations:
+            self._reservations.remove(request)
 
     @property
-    def allocated_quantity(self) -> int:
-        return sum(request.availability for request in self._allocations)
+    def reserved_quantity(self) -> int:
+        return sum(request.reservation_qty for request in self._reservations)
 
     @property
     def available_quantity(self) -> int:
-        return self._purchased_quantity - self.allocated_quantity
+        return self.slot_qty - self.reserved_quantity
 
-    def can_allocate(self, request: CheckInRequest) -> bool:
-        return self.service_type == request.service_type and self.available_quantity >= request.availability
+    def can_reserve(self, request: CheckInRequest) -> bool:
+        return self.service_type == request.service_type and self.available_quantity >= request.reservation_qty

@@ -11,7 +11,7 @@ check_in_requests = Table(
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("service_type", String(255)),
     Column("availability", Integer, nullable=False),
-    Column("orderid", String(255)),
+    Column("requestid", String(255)),
 )
 
 appointment_slots = Table(
@@ -20,29 +20,29 @@ appointment_slots = Table(
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("slot_reference", String(255)),
     Column("service_type", String(255)),
-    Column("_purchased_quantity", Integer, nullable=False),
+    Column("slot_qty", Integer, nullable=False),
     Column("start_time", Date, nullable=True),
 )
 
-checked_into_location = Table(
-    "checked_into_location",
+reservations = Table(
+    "reservations",
     mapper_registry.metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
-    Column("orderline_id", ForeignKey("order_lines.id")),
+    Column("checkinrequest_id", ForeignKey("check_in_requests.id")),
     Column("slot_id", ForeignKey("appointment_slots.id")),
 )
 
 
 def start_mappers():
-    lines_mapper = mapper_registry.map_imperatively(
-        model.CheckInRequest, order_lines)
+    requests_mapper = mapper_registry.map_imperatively(
+        model.CheckInRequest, check_in_requests)
     mapper_registry.map_imperatively(
         model.ServiceOffering,
         appointment_slots,
         properties={
-            "_checked_into_location": relationship(
-                lines_mapper,
-                secondary=checked_into_location,
+            "_reservations": relationship(
+                requests_mapper,
+                secondary=reservations,
                 collection_class=set,
             )
         },

@@ -9,20 +9,20 @@ from allocation.adapters import repository
 
 
 class AbstractUnitOfWork(abc.ABC):
-    products: repository.AbstractRepository
+    check_in_requests: repository.AbstractRepository
 
     def __enter__(self) -> AbstractUnitOfWork:
         return self
 
     def __exit__(self, *args):
-        self.rollback()
+        self.cancel_reservation()
 
     @abc.abstractmethod
-    def commit(self):
+    def reserve_slot(self):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def rollback(self):
+    def cancel_reservation(self):
         raise NotImplementedError
 
 
@@ -40,15 +40,17 @@ class SqlAlchemyUnitOfWork(AbstractUnitOfWork):
 
     def __enter__(self):
         self.session = self.session_factory()  # type: Session
-        self.products = repository.SqlAlchemyRepository(self.session)
+        self.check_in_requests = repository.SqlAlchemyRepository(self.session)
         return super().__enter__()
 
     def __exit__(self, *args):
         super().__exit__(*args)
         self.session.close()
 
-    def commit(self):
+    def reserve_slot(self):
         self.session.commit()
 
-    def rollback(self):
+    def cancel_reservation(self):
+        self.session.rollback()
+
         self.session.rollback()

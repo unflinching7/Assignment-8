@@ -7,7 +7,7 @@ from allocation.domain.model import CheckInRequest
 from allocation.service_layer import unit_of_work
 
 
-class NotEnoughAvailability(Exception):
+class InvalidServiceType(Exception):
     pass
 
 
@@ -21,22 +21,22 @@ def add_appointment_slot(
             service_offering = domain_model.ServiceOffering(
                 service_type, slots=[])
             uow.service_offerings.add(service_offering)
-        service_offering.slots.append(domain_model.Slot(
+        service_offering.slots.append(domain_model.AppointmentSlot(
             slot_reference, service_type, availability, start_time))
         uow.commit()
 
 
-def allocate_slot(
-    orderid: str, service_type: str, availability: int,
+def reserve_slot(
+    requestid: str, service_type: str, availability: int,
     uow: unit_of_work.AbstractUnitOfWork,
 ) -> str:
-    check_in_request = CheckInRequest(orderid, service_type, availability)
+    check_in_request = CheckInRequest(requestid, service_type, availability)
     with uow:
         service_offering = uow.service_offerings.get(
             service_type=check_in_request.service_type)
         if service_offering is None:
-            raise InvalidSku(
+            raise InvalidServiceType(
                 f"Invalid service type {check_in_request.service_type}")
-        slot_ref = service_offering.allocate(check_in_request)
+        slot_ref = service_offering.reserve_slot(check_in_request)
         uow.commit()
     return slot_ref
