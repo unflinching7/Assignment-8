@@ -1,63 +1,151 @@
+# pylint: disable=no-self-use
+from __future__ import annotations
+
+from collections import defaultdict
+from datetime import date
+from typing import Dict, List
+
 import pytest
-from allocation.adapters import repository
+from allocation import bootstrap
+from allocation.adapters import notifications, repository
+from allocation.domain import commands
 from allocation.service_layer import handlers, unit_of_work
 
 
 class FakeRepository(repository.AbstractRepository):
-    def __init__(self, products):
-        self._products = set(products)
+    def __init__(self, services):
+        super().__init__()
+        self._services = set(services)
 
-    def add(self, product):
-        self._products.add(product)
+    def _add(self, service_offering):
+        self._services.add(service_offering)
 
-    def get(self, sku):
-        return next((p for p in self._products if p.sku == sku), None)
+    def _get(self, service_type):
+        return next((p for p in self._services if p.service_type == service_type), None)
+
+    def _get_by_slot_ref(self, slot_ref):
+        return next(
+            (p for p in self._services for s in p.appointment_slots if s.slot_reference == slot_ref),
+            None,
+        )
 
 
 class FakeUnitOfWork(unit_of_work.AbstractUnitOfWork):
     def __init__(self):
-        self.products = FakeRepository([])
+        self.services = FakeRepository([])
         self.committed = False
 
-    def commit(self):
+    def _commit(self):
         self.committed = True
 
     def rollback(self):
         pass
 
 
-def test_add_batch_for_new_product():
-    uow = FakeUnitOfWork()
-    handlers.add_batch("b1", "CRUNCHY-ARMCHAIR", 100, None, uow)
-    assert uow.products.get("CRUNCHY-ARMCHAIR") is not None
-    assert uow.committed
+class FakeNotifications(notifications.AbstractNotifications):
+    def __init__(self):
+        self.sent = defaultdict(list)  # type: Dict[str, List[str]]
+
+    def send(self, destination, message):
+        self.sent[destination].append(message)
 
 
-def test_add_batch_for_existing_product():
-    uow = FakeUnitOfWork()
-    handlers.add_batch("b1", "GARISH-RUG", 100, None, uow)
-    handlers.add_batch("b2", "GARISH-RUG", 99, None, uow)
-    assert "b2" in [
-        b.reference for b in uow.products.get("GARISH-RUG").batches]
+def bootstrap_test_app():
+    return bootstrap.bootstrap(
+        start_orm=False,
+        uow=FakeUnitOfWork(),
+        notifications=FakeNotifications(),
+        publish=lambda *args: None,
+    )
 
 
-def test_allocate_returns_allocation():
-    uow = FakeUnitOfWork()
-    handlers.add_batch("batch1", "COMPLICATED-LAMP", 100, None, uow)
-    result = handlers.allocate("o1", "COMPLICATED-LAMP", 10, uow)
-    assert result == "batch1"
+class TestAddSlot:
+    def test_for_new_service_offering(self):
+        bus = bootstrap_test_app()
+        bus.handle(commands.InsertSlot(
+            "b1", "chiropractic service", 100, None))
+        assert bus.uow.services.get("chiropractic service") is not None
+        assert bus.uow.committed
+
+    def test_for_existing_service_offering(self):
+        bus = bootstrap_test_app()
+        bus.handle(commands.InsertSlot(
+            "b1", "chiropractic service", 100, None))
+        bus.handle(commands.InsertSlot("b2", "chiropractic service", 99, None))
+        assert "b2" in [s.slot_reference for s in bus.uow.services.get(
+            "chiropractic service").appointment_slots]
 
 
-def test_allocate_errors_for_invalid_sku():
-    uow = FakeUnitOfWork()
-    handlers.add_batch("b1", "AREALSKU", 100, None, uow)
+class TestReserveSlot:
+    def test_reserves_slot(self):
+        bus = bootstrap_test_app()
+        bus.handle(commands.InsertSlot(
+            "batch1", "chiropractic service", 100, None))
+        bus.handle(commands.ReserveSlot("o1", "chiropractic service", 10))
+        [slot] = bus.uow.services.get("chiropractic service").appointment_slots
+        assert slot.availability == 90
 
-    with pytest.raises(handlers.InvalidSku, match="Invalid sku NONEXISTENTSKU"):
-        handlers.allocate("o1", "NONEXISTENTSKU", 10, uow)
+    def test_errors_for_invalid_service_type(self):
+        bus = bootstrap_test_app()
+        bus.handle(commands.InsertSlot(
+            "b1", "chiropractic service", 100, None))
+
+        with pytest.raises(handlers.InvalidServiceType, match="Invalid service type NONEXISTENTSERVICE"):
+            bus.handle(commands.ReserveSlot("o1", "NONEXISTENTSERVICE", 10))
+
+    def test_commits(self):
+        bus = bootstrap_test_app()
+        bus.handle(commands.InsertSlot(
+            "b1", "chiropractic service", 100, None))
+        bus.handle(commands.ReserveSlot("o1", "chiropractic service", 10))
+        assert bus.uow.committed
+
+    def test_sends_email_on_no_available_slots_error(self):
+    fake_notifs = FakeNotifications()
+    bus = bootstrap.bootstrap(
+        start_orm=False,
+        uow=FakeUnitOfWork(),
+        notifications=fake_notifs,
+        publish=lambda *args: None,
+    )
+    bus.handle(commands.InsertSlot("b1", "chiropractic service", 9, None))
+    bus.handle(commands.ReserveSlot("o1", "chiropractic service", 10))
+    assert fake_notifs.sent["slots@made.com"] == [
+        f"No available slots for chiropractic service",
+    ]
 
 
-def test_allocate_commits():
-    uow = FakeUnitOfWork()
-    handlers.add_batch("b1", "OMINOUS-MIRROR", 100, None, uow)
-    handlers.allocate("o1", "OMINOUS-MIRROR", 10, uow)
-    assert uow.committed
+class TestChangeSlotAvailability:
+    def test_changes_available_quantity(self):
+        bus = bootstrap_test_app()
+        bus.handle(commands.InsertSlot(
+            "slot1", "chiropractic service", 100, None))
+        [slot] = bus.uow.services.get(
+            service_type="chiropractic service").slots
+        assert slot.availability == 100
+
+        bus.handle(commands.ChangeSlotAvailability("slot1", 50))
+        assert slot.availability == 50
+
+    def test_reallocates_if_necessary(self):
+        bus = bootstrap_test_app()
+        history = [
+            commands.InsertSlot("slot1", "chiropractic service", 50, None),
+            commands.InsertSlot(
+                "slot2", "chiropractic service", 50, date.today()),
+            commands.ReserveSlot("request1", "chiropractic service", 20),
+            commands.ReserveSlot("request2", "chiropractic service", 20),
+        ]
+        for msg in history:
+            bus.handle(msg)
+        [slot1, slot2] = bus.uow.services.get(
+            service_type="chiropractic service").slots
+        assert slot1.availability == 10
+        assert slot2.availability == 50
+
+        bus.handle(commands.ChangeSlotAvailability("slot1", 25))
+
+        # request1 or request2 will be cancelled, so we'll have 25 - 20
+        assert slot1.availability == 5
+        # and 20 will be reallocated to the next slot
+        assert slot2.availability == 30

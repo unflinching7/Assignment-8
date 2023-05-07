@@ -1,66 +1,102 @@
 from datetime import date, timedelta
-import pytest
-from allocation.domain.model import Product, OrderLine, Batch, OutOfStock
+
+from allocation.domain import events
+from allocation.domain.model import AppointmentSlot, CheckInRequest, ServiceOffering
 
 today = date.today()
 tomorrow = today + timedelta(days=1)
 later = tomorrow + timedelta(days=10)
 
 
-def test_prefers_warehouse_batches_to_shipments():
-    in_stock_batch = Batch("in-stock-batch", "RETRO-CLOCK", 100, eta=None)
-    shipment_batch = Batch("shipment-batch", "RETRO-CLOCK", 100, eta=tomorrow)
-    product = Product(sku="RETRO-CLOCK",
-                      batches=[in_stock_batch, shipment_batch])
-    line = OrderLine("oref", "RETRO-CLOCK", 10)
+def test_prefers_location1_slots_to_location2():
+    location1_slot = AppointmentSlot(
+        "location1-slot", "chiropractic service", 100, start_time=None)
+    location2_slot = AppointmentSlot(
+        "location2-slot", "chiropractic service", 100, start_time=tomorrow)
+    service = ServiceOffering(service_type="chiropractic service", appointment_slots=[
+                              location1_slot, location2_slot])
+    check_in_request = CheckInRequest("oref", "chiropractic service", 10)
 
-    product.allocate(line)
+    service.reserve_slot(check_in_request)
 
-    assert in_stock_batch.available_quantity == 90
-    assert shipment_batch.available_quantity == 100
+    assert location1_slot.available_quantity == 90
+    assert location2_slot.available_quantity == 100
 
 
-def test_prefers_earlier_batches():
-    earliest = Batch("speedy-batch", "MINIMALIST-SPOON", 100, eta=today)
-    medium = Batch("normal-batch", "MINIMALIST-SPOON", 100, eta=tomorrow)
-    latest = Batch("slow-batch", "MINIMALIST-SPOON", 100, eta=later)
-    product = Product(sku="MINIMALIST-SPOON",
-                      batches=[medium, earliest, latest])
-    line = OrderLine("order1", "MINIMALIST-SPOON", 10)
+def test_prefers_earlier_slots():
+    earliest = AppointmentSlot(
+        "speedy-slot", "chiropractic service", 100, start_time=today)
+    medium = AppointmentSlot(
+        "normal-slot", "chiropractic service", 100, start_time=tomorrow)
+    latest = AppointmentSlot(
+        "slow-slot", "chiropractic service", 100, start_time=later)
+    service = ServiceOffering(service_type="chiropractic service", appointment_slots=[
+                              medium, earliest, latest])
+    check_in_request = CheckInRequest("request1", "chiropractic service", 10)
 
-    product.allocate(line)
+    service.reserve_slot(check_in_request)
 
     assert earliest.available_quantity == 90
     assert medium.available_quantity == 100
     assert latest.available_quantity == 100
 
 
-def test_returns_allocated_batch_ref():
-    in_stock_batch = Batch("in-stock-batch-ref",
-                           "HIGHBROW-POSTER", 100, eta=None)
-    shipment_batch = Batch("shipment-batch-ref",
-                           "HIGHBROW-POSTER", 100, eta=tomorrow)
-    line = OrderLine("oref", "HIGHBROW-POSTER", 10)
-    product = Product(sku="HIGHBROW-POSTER",
-                      batches=[in_stock_batch, shipment_batch])
-    allocation = product.allocate(line)
-    assert allocation == in_stock_batch.reference
+def test_returns_reserved_slot_ref():
+    in_stock_slot = AppointmentSlot(
+        "in-stock-slot-ref", "chiropractic service", 100, start_time=None)
+    appointment_slot = AppointmentSlot(
+        "appointment-slot-ref", "chiropractic service", 100, start_time=tomorrow)
+    check_in_request = CheckInRequest("oref", "chiropractic service", 10)
+    service = ServiceOffering(service_type="chiropractic service", appointment_slots=[
+                              in_stock_slot, appointment_slot])
+    reservation = service.reserve_slot(check_in_request)
+    assert reservation == in_stock_slot.slot_reference
 
 
-def test_raises_out_of_stock_exception_if_cannot_allocate():
-    batch = Batch("batch1", "SMALL-FORK", 10, eta=today)
-    product = Product(sku="SMALL-FORK", batches=[batch])
-    product.allocate(OrderLine("order1", "SMALL-FORK", 10))
-
-    with pytest.raises(OutOfStock, match="SMALL-FORK"):
-        product.allocate(OrderLine("order2", "SMALL-FORK", 1))
-
-
-def test_increments_version_number():
-    line = OrderLine("oref", "SCANDI-PEN", 10)
-    product = Product(
-        sku="SCANDI-PEN", batches=[Batch("b1", "SCANDI-PEN", 100, eta=None)]
+def test_outputs_reserved_event():
+    slot = AppointmentSlot(
+        "slotref", "chiropractic service", 100, start_time=None)
+    check_in_request = CheckInRequest("oref", "chiropractic service", 10)
+    service = ServiceOffering(
+        service_type="chiropractic service", appointment_slots=[slot])
+    service.reserve_slot(check_in_request)
+    expected = events.Reserved(
+        requestid="oref", service_type="chiropractic service", availability=10, slot_ref=slot.slot_reference
     )
-    product.version_number = 7
-    product.allocate(line)
-    assert product.version_number == 8
+    assert service.events[-1] == expected
+
+
+def test_records_no_available_slots_event_if_cannot_reserve():
+    slot = AppointmentSlot(
+        "slot1", "chiropractic service", 10, start_time=today)
+    service = ServiceOffering(
+        service_type="chiropractic service", appointment_slots=[slot])
+    service.reserve_slot(CheckInRequest(
+        "request1", "chiropractic service", 10))
+
+    reservation = service.reserve_slot(
+        CheckInRequest("request2", "chiropractic service", 1))
+    assert service.events[-1] == events.NoAvailableSlots(
+        service_type="chiropractic service")
+    assert reservation is None
+
+
+def test_increment_location_number():
+    check_in_request = CheckInRequest(
+        requestid="oref",
+        service_type="chiropractic service",
+        availability=10,
+        location_number=7,
+        slot_reference="slot1",
+    )
+    service_offering = ServiceOffering(
+        service_type="chiropractic service",
+        appointment_slots=[AppointmentSlot(
+            slot_ref="slot1", start_time=None, slot_availability=100)],
+        location_number=7,
+    )
+
+    service_offering.increment_location_number()
+
+    assert service_offering.location_number == 8
+    assert service_offering.appointment_slots[0].slot_availability == 100

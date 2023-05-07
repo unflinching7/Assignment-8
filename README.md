@@ -1,4 +1,4 @@
-Product Busines to	Service	Business Renamings:
+Product Business to	Service	Business Renamings:
 
 _allocations	to	_reservations
 
