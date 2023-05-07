@@ -1,0 +1,36 @@
+import requests
+from allocation import config
+
+
+def insert_slot(slot_ref, service_type, availability, start_time):
+    url = config.get_api_url()
+    r = requests.post(
+        f"{url}/add_slot",
+        json={
+            "slot_ref": slot_ref,
+            "service_type": service_type,
+            "availability": availability,
+            "start_time": start_time,
+        },
+    )
+    assert r.status_code == 201
+
+
+def reserve_slot(requestid, service_type, availability, expect_success=True):
+    url = config.get_api_url()
+    r = requests.post(
+        f"{url}/reserve_slot",
+        json={
+            "requestid": requestid,
+            "service_type": service_type,
+            "availability": availability,
+        },
+    )
+    if expect_success:
+        assert r.status_code == 202
+    return r
+
+
+def get_reservation(requestid):
+    url = config.get_api_url()
+    return requests.get(f"{url}/reservations/{requestid}")
