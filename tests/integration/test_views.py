@@ -24,27 +24,32 @@ def sqlite_bus(sqlite_session_factory):
 
 
 def test_reservations_view(sqlite_bus):
-    sqlite_bus.handle(commands.InsertSlot("sku1slot", "sku1", 50, None))
-    sqlite_bus.handle(commands.InsertSlot("sku2slot", "sku2", 50, today))
-    sqlite_bus.handle(commands.ReserveSlot("order1", "sku1", 20))
-    sqlite_bus.handle(commands.ReserveSlot("order1", "sku2", 20))
-    # add a spurious slot and order to make sure we're getting the right ones
-    sqlite_bus.handle(commands.InsertSlot("sku1slot-later", "sku1", 50, today))
-    sqlite_bus.handle(commands.ReserveSlot("otherorder", "sku1", 30))
-    sqlite_bus.handle(commands.ReserveSlot("otherorder", "sku2", 10))
+    sqlite_bus.handle(commands.InsertSlot(
+        "service_type1slot", "service_type1", 50, None))
+    sqlite_bus.handle(commands.InsertSlot(
+        "service_type2slot", "service_type2", 50, today))
+    sqlite_bus.handle(commands.ReserveSlot("request1", "service_type1", 20))
+    sqlite_bus.handle(commands.ReserveSlot("request1", "service_type2", 20))
+    # add a spurious slot and request to make sure we're getting the right ones
+    sqlite_bus.handle(commands.InsertSlot(
+        "service_type1slot-later", "service_type1", 50, today))
+    sqlite_bus.handle(commands.ReserveSlot(
+        "otherrequest", "service_type1", 30))
+    sqlite_bus.handle(commands.ReserveSlot(
+        "otherrequest", "service_type2", 10))
 
-    assert views.reservations("order1", sqlite_bus.uow) == [
-        {"service_type": "sku1", "slot_ref": "sku1slot"},
-        {"service_type": "sku2", "slot_ref": "sku2slot"},
+    assert views.reservations("request1", sqlite_bus.uow) == [
+        {"service_type": "service_type1", "slot_ref": "service_type1slot"},
+        {"service_type": "service_type2", "slot_ref": "service_type2slot"},
     ]
 
 
 def test_cancel_reservation(sqlite_bus):
-    sqlite_bus.handle(commands.InsertSlot("slot1", "sku1", 50, None))
-    sqlite_bus.handle(commands.InsertSlot("slot2", "sku1", 50, today))
-    sqlite_bus.handle(commands.ReserveSlot("order1", "sku1", 40))
+    sqlite_bus.handle(commands.InsertSlot("slot1", "service_type1", 50, None))
+    sqlite_bus.handle(commands.InsertSlot("slot2", "service_type1", 50, today))
+    sqlite_bus.handle(commands.ReserveSlot("request1", "service_type1", 40))
     sqlite_bus.handle(commands.ChangeSlotAvailability("slot1", 10))
 
-    assert views.reservations("order1", sqlite_bus.uow) == [
-        {"service_type": "sku1", "slot_ref": "slot2"},
+    assert views.reservations("request1", sqlite_bus.uow) == [
+        {"service_type": "service_type1", "slot_ref": "slot2"},
     ]
